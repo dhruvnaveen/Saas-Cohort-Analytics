@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cohort Analytics — SaaS Retention Tool</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #181b24; --panel2: #1f2330; --border: #2a2f3e;
+    --text: #e6e8ee; --muted: #8b91a3; --accent: #6c7cff; --green: #34d399;
+    --red: #f87171; --amber: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; padding: 24px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); margin-bottom: 24px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; color: var(--text); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  #drop { border: 2px dashed var(--border); border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: .15s; }
+  #drop:hover, #drop.over { border-color: var(--accent); background: var(--panel2); }
+  #drop strong { color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .err { background: #2c1820; border: 1px solid #5c2433; color: #fda4af; padding: 10px 14px; border-radius: 8px; margin-top: 12px; white-space: pre-wrap; }
+  .warn { background: #2a2410; border: 1px solid #5c4d1a; color: var(--amber); padding: 10px 14px; border-radius: 8px; margin-top: 12px; }
+  .ok { background: #122a20; border: 1px solid #1d4a36; color: var(--green); padding: 10px 14px; border-radius: 8px; margin-top: 12px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 12px; margin-bottom: 20px; }
+  .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .kpi .v { font-size: 24px; font-weight: 700; }
+  .kpi .l { color: var(--muted); font-size: 12px; }
+  table.heat { border-collapse: collapse; font-size: 12px; width: 100%; }
+  table.heat th, table.heat td { padding: 6px 8px; text-align: center; border: 1px solid var(--bg); border-radius: 4px; }
+  table.heat th { color: var(--muted); font-weight: 600; }
+  table.heat td.cohort { text-align: left; color: var(--text); font-weight: 600; background: var(--panel2); white-space: nowrap; position: sticky; left: 0; }
+  table.heat td.n { color: var(--muted); background: var(--panel2); }
+  table.heat td[data-tip] { cursor: default; }
+  .scroll { overflow-x: auto; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .row2 { grid-template-columns: 1fr; } }
+  canvas { max-height: 320px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: var(--panel2); border: 1px solid var(--border); color: var(--text); font-weight: 500; padding: 6px 12px; font-size: 12px; }
+  button.ghost.on { border-color: var(--accent); color: var(--accent); }
+  input[type=password] { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 10px 12px; width: 320px; font-size: 13px; }
+  select { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 13px; width: 100%; }
+  select.missing { border-color: var(--red); }
+  #aiOut { margin-top: 14px; padding: 14px 16px; background: var(--panel2); border-left: 3px solid var(--accent); border-radius: 8px; font-size: 14.5px; display: none; }
+  .spin { display:inline-block; width:14px; height:14px; border:2px solid var(--muted); border-top-color: var(--accent); border-radius:50%; animation: s .7s linear infinite; vertical-align: -2px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  .pill { display:inline-block; background: var(--panel2); border:1px solid var(--border); border-radius:99px; padding:2px 10px; font-size:11px; color:var(--muted); margin-right:6px; }
+  .pill.good { color: var(--green); border-color: #1d4a36; }
+  .pill.bad { color: var(--red); border-color: #5c2433; }
+  #results, #mapper { display: none; }
+  table.map { width:100%; border-collapse: collapse; font-size: 13px; }
+  table.map th { text-align:left; color: var(--muted); font-weight:600; padding: 8px; border-bottom: 1px solid var(--border); }
+  table.map td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.map td.fname { white-space: nowrap; font-weight: 600; }
+  .req { color: var(--red); }
+  .samples { color: var(--muted); font-size: 11.5px; font-family: ui-monospace, monospace; word-break: break-all; }
+  .fdesc { color: var(--muted); font-size: 11.5px; font-weight: 400; }
+</style>
+</head>
+<body>
+
+<h1>Cohort Analytics</h1>
+<div class="sub">Upload a subscription export &rarr; retention heatmap, NRR waterfall, churn reasons, AI summary.</div>
+
+<div class="card">
+  <div id="drop">
+    <div><strong>Drop a CSV / TSV here</strong> or click to browse</div>
+    <div class="hint">Any subscription export works — columns are auto-detected and you can remap them before analysis. Your data never leaves this browser.</div>
+    <input type="file" id="file" accept=".csv,.tsv,.txt" hidden>
+  </div>
+  <div id="parseMsg"></div>
+</div>
+
+<div class="card" id="mapper">
+  <h2>Map your columns <span class="pill" id="mapConf"></span></h2>
+  <div class="hint" style="margin:0 0 12px">I guessed the mapping below from your headers and a sample of the values. Fix anything that looks wrong, then run the analysis.</div>
+  <table class="map">
+    <tr><th style="width:190px">Field</th><th style="width:260px">Your column</th><th>Sample values</th></tr>
+    <tbody id="mapRows"></tbody>
+  </table>
+  <div style="margin-top:14px; display:flex; gap:10px; align-items:center">
+    <button id="applyMap">Run analysis</button>
+    <span class="hint" id="mapHint"></span>
+  </div>
+</div>
+
+<div id="results">
+  <div class="kpis" id="kpis"></div>
+
+  <div class="card">
+    <h2>Retention heatmap — cohort survival by month
+      <span style="margin-left:auto; display:flex; gap:6px">
+        <button class="ghost on" id="modePct">%</button>
+        <button class="ghost" id="modeN"># customers</button>
+      </span>
+    </h2>
+    <div class="scroll"><div id="heatmap"></div></div>
+  </div>
+
+  <div class="row2">
+    <div class="card">
+      <h2>NRR waterfall — <span id="wfMonth"></span></h2>
+      <canvas id="waterfall"></canvas>
+      <div class="hint">NRR = (starting MRR &minus; churned MRR) / starting MRR. Expansion/contraction requires monthly MRR history (v2).</div>
+    </div>
+    <div class="card">
+      <h2>NRR trend</h2>
+      <canvas id="nrrTrend"></canvas>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="card">
+      <h2>Churn reasons — customers</h2>
+      <canvas id="reasonsChart"></canvas>
+    </div>
+    <div class="card">
+      <h2>Churn reasons — lost MRR</h2>
+      <canvas id="reasonsMrr"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>AI insight summary</h2>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+      <input type="password" id="apiKey" placeholder="Anthropic API key (sk-ant-...) — stays in your browser">
+      <button id="aiBtn">Generate summary</button>
+      <button class="ghost" id="copyBtn" style="display:none">Copy</button>
+      <span class="pill">Claude API</span><span class="pill">Grounded in your data</span>
+    </div>
+    <div id="aiOut"></div>
+    <div id="aiVerify" style="display:none; margin-top:10px"></div>
+    <details style="margin-top:10px"><summary style="cursor:pointer; color:var(--muted); font-size:12px">Show facts sent to the model (the model never sees raw data)</summary>
+      <pre id="aiFacts" style="background:var(--panel2); border-radius:8px; padding:12px; font-size:11.5px; overflow-x:auto; margin-top:8px; color:var(--muted)"></pre>
+    </details>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ================= column detection (name + content scoring) =================
+   Real-world exports name columns unpredictably. Detection scores every
+   (field, column) pair on two signals:
+     - name score: normalized synonym match / containment / token overlap
+     - content score: do the actual values look like dates, money, statuses, ids
+   Best assignment wins greedily; anything below confidence threshold is left
+   for the user to map manually in the mapping panel. */
+
+const FIELDS = {
+  customer_id: { req: true,  desc: "Unique customer/account identifier",
+    syns: ["customer id","customer_id","customerid","id","user id","user_id","userid","account id","account_id","client id","member id","subscriber id","subscription id","email"],
+    tokens: [["customer","user","account","client","member","subscriber","subscri"],["id","key","code","ref","email","no","number"]], secondaryOnly: true },
+  signup_date: { req: true,  desc: "When the subscription started",
+    syns: ["signup date","signup_date","start date","start_date","created at","created_at","created","join date","joined","subscription start","first payment date","registration date","activated at","conversion date"],
+    tokens: [["signup","start","creat","join","regist","activat","subscri","first","convers"],["date","at","on","dt","time","day"]] },
+  status:      { req: true,  desc: "Active vs churned/canceled",
+    syns: ["status","state","subscription status","customer status","account status","lifecycle stage"],
+    tokens: [["status","state","stage","lifecycle"],[]] },
+  mrr:         { req: true,  desc: "Monthly recurring revenue per customer",
+    syns: ["mrr","monthly revenue","monthly_revenue","amount","arpu","revenue","plan amount","plan_amount","price","subscription value","monthly fee","plan price","mrr usd","mrr ($)","recurring revenue"],
+    tokens: [["mrr","revenue","amount","price","fee","value","arpu","cost"],[]] },
+  churn_date:  { req: false, desc: "When the customer churned (blank if active)",
+    syns: ["churn date","churn_date","churndate","cancel date","cancel_date","cancelled at","cancelled_at","canceled at","canceled_at","cancellation date","end date","end_date","ended at","churned at","churned_at","deactivated at","closed date","termination date","cancel dt","churn dt"],
+    tokens: [["churn","cancel","end","clos","deactiv","terminat","expir","left"],["date","at","on","dt","time","day"]] },
+  churn_reason:{ req: false, desc: "Why they churned (for the breakdown)",
+    syns: ["churn reason","churn_reason","cancel reason","cancel_reason","reason","cancellation reason","cancellation_reason","exit reason","cancel note","churn category","loss reason"],
+    tokens: [["churn","cancel","exit","loss","leav"],["reason","note","category","why","cause","comment","feedback"]] }
+};
+
+const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+const tokensOf = s => String(s).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+function nameScore(field, header) {
+  const def = FIELDS[field], hn = norm(header), htoks = tokensOf(header);
+  if (!hn) return 0;
+  for (const s of def.syns) if (norm(s) === hn) return 100;
+  for (const s of def.syns) { const sn = norm(s); if (sn.length >= 4 && (hn.includes(sn) || sn.includes(hn) && hn.length >= 4)) return 70; }
+  const [primary, secondary] = def.tokens;
+  const hasP = htoks.some(t => primary.some(p => t.startsWith(p)));
+  if (!secondary || secondary.length === 0) return hasP ? 55 : 0;
+  const hasS = htoks.some(t => secondary.includes(t));
+  if (hasP && hasS) return 65;
+  if (hasP) return 35;
+  if (hasS && def.secondaryOnly) return 30; // id-like fields only: "Klant ID", "Mitglied Nr"
+  return 0;
+}
+
+function contentScore(field, samples) {
+  if (!samples.length) return field === "churn_date" || field === "churn_reason" ? 5 : 0;
+  const n = samples.length;
+  const rate = f => samples.filter(f).length / n;
+  switch (field) {
+    case "signup_date": case "churn_date": {
+      const r = rate(v => parseDateSmart(v) != null);
+      return r > .9 ? 30 : r > .6 ? 15 : -40;
+    }
+    case "mrr": {
+      const r = rate(v => parseMoney(v) != null);
+      return r > .9 ? 25 : r > .6 ? 10 : -40;
+    }
+    case "status": {
+      const distinct = new Set(samples.map(v => String(v).toLowerCase().trim()));
+      const known = [...distinct].filter(v => STATUS_CHURNED.test(v) || STATUS_ACTIVE.test(v)).length;
+      if (distinct.size <= 8 && known > 0) return 30;
+      return distinct.size <= 8 ? 5 : -30;
+    }
+    case "customer_id": {
+      const uniq = new Set(samples).size / n;
+      return uniq > .95 ? 20 : uniq > .7 ? 5 : -20;
+    }
+    case "churn_reason": {
+      const distinct = new Set(samples.map(v => String(v).toLowerCase().trim()));
+      const looksDate = rate(v => parseDateSmart(v) != null);
+      if (looksDate > .5) return -40;
+      return distinct.size <= Math.max(12, n * .5) ? 15 : 0;
+    }
+  }
+  return 0;
+}
+
+function detectColumns(headers, rows) {
+  const sampleFor = h => rows.slice(0, 200).map(r => r[h]).filter(v => v != null && String(v).trim() !== "").slice(0, 50);
+  const scores = [];
+  for (const field of Object.keys(FIELDS))
+    for (const h of headers) {
+      const ns = nameScore(field, h);
+      if (ns <= 0 && (field === "churn_date" || field === "churn_reason")) continue; // never content-guess these without name evidence
+      const total = ns + contentScore(field, sampleFor(h));
+      if (total > 0) scores.push({ field, header: h, score: total });
+    }
+  scores.sort((a, b) => b.score - a.score);
+  const map = {}, used = new Set(), conf = {};
+  for (const s of scores) {
+    if (map[s.field] || used.has(s.header)) continue;
+    if (s.score < 50) continue;
+    map[s.field] = s.header; conf[s.field] = s.score; used.add(s.header);
+  }
+  return { map, conf };
+}
+
+/* ================= robust value parsing ================= */
+
+const STATUS_CHURNED = /churn|cancel|inactiv|expir|ended|closed|lost|terminat|deactiv|past[_ ]?due|unsubscrib/i;
+const STATUS_ACTIVE  = /^active$|^live$|^current$|trial|paying|subscribed|^open$|^enabled$/i;
+
+let DATE_ORDER = "MDY"; // file-level heuristic for ambiguous slash dates, set in inferDateOrder
+
+function inferDateOrder(values) {
+  let dayFirst = 0, monthFirst = 0;
+  for (const v of values) {
+    const m = String(v).trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (!m) continue;
+    const a = +m[1], b = +m[2];
+    if (a > 12 && b <= 12) dayFirst++;
+    if (b > 12 && a <= 12) monthFirst++;
+  }
+  DATE_ORDER = dayFirst > monthFirst ? "DMY" : "MDY";
+}
+
+function parseDateSmart(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return isNaN(v) ? null : v;
+  const s = String(v).trim();
+  if (!s) return null;
+  // Excel serial date (days since 1899-12-30; 25569 = 1970-01-01)
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    const serial = parseFloat(s);
+    if (serial > 25569 && serial < 80000) {
+      const d = new Date(Math.round((serial - 25569) * 86400000));
+      return isNaN(d) ? null : d;
+    }
+  }
+  // ISO and unambiguous formats
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) { const d = new Date(Date.UTC(+m[1], +m[2]-1, +m[3])); return isNaN(d) ? null : d; }
+  // slash/dot/dash little formats, disambiguated by file-level order
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) {
+    let [_, a, b, y] = m.map(Number);
+    if (y < 100) y += y < 50 ? 2000 : 1900;
+    let day, mon;
+    if (a > 12) { day = a; mon = b; }
+    else if (b > 12) { day = b; mon = a; }
+    else if (DATE_ORDER === "DMY") { day = a; mon = b; }
+    else { mon = a; day = b; }
+    if (mon < 1 || mon > 12 || day < 1 || day > 31) return null;
+    const d = new Date(Date.UTC(y, mon - 1, day));
+    return isNaN(d) ? null : d;
+  }
+  // fall back to engine parsing ("Mar 5, 2025", ISO datetime, etc.)
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+
+function parseMoney(v) {
+  if (v == null) return null;
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  let s = String(v).trim();
+  if (!s) return null;
+  s = s.replace(/[^\d.,\-]/g, "");                  // strip $, €, £, spaces, "USD"
+  if (!s) return null;
+  if (/,\d{2}$/.test(s) && !/\.\d{2}$/.test(s)) {   // european decimal: 1.234,56
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else {
+    s = s.replace(/,/g, "");                        // thousands: 1,234.56
+  }
+  const f = parseFloat(s);
+  return isFinite(f) ? f : null;
+}
+
+/* ================= ingest ================= */
+
+let RAW = null;   // { rows, headers }
+let DATA = null;  // analysis output
+
+const monthKey = d => d.getUTCFullYear() + "-" + String(d.getUTCMonth()+1).padStart(2,"0");
+const monthIdx = d => d.getUTCFullYear()*12 + d.getUTCMonth();
+
+function ingest(rows, colMap) {
+  const customers = [], problems = [], noDate = [], badChurnOrder = [];
+  // set the file-level date order from all date-ish values first
+  const dateVals = [];
+  for (const r of rows.slice(0, 500)) {
+    if (colMap.signup_date) dateVals.push(r[colMap.signup_date]);
+    if (colMap.churn_date) dateVals.push(r[colMap.churn_date]);
+  }
+  inferDateOrder(dateVals.filter(v => v != null && String(v).trim() !== ""));
+
+  rows.forEach((r, i) => {
+    const id = r[colMap.customer_id];
+    const signup = parseDateSmart(r[colMap.signup_date]);
+    const mrr = parseMoney(r[colMap.mrr]);
+    const status = String(r[colMap.status] ?? "").toLowerCase().trim();
+    let churn = colMap.churn_date ? parseDateSmart(r[colMap.churn_date]) : null;
+    const reason = colMap.churn_reason ? String(r[colMap.churn_reason] ?? "").trim() : "";
+    if (!id || !signup || mrr == null || mrr < 0) { problems.push(i + 2); return; }
+    if (churn && churn < signup) { badChurnOrder.push(i + 2); churn = null; }
+    const statusChurned = STATUS_CHURNED.test(status);
+    if (statusChurned && !churn) noDate.push(i + 2);
+    customers.push({ id: String(id), signup, mrr, churn: churn || null, reason: reason || null });
+  });
+  return { customers, problems, noDate, badChurnOrder };
+}
+
+/* ================= analytics ================= */
+
+function analyze(customers) {
+  const now = new Date();
+  const nowIdx = monthIdx(now);
+  const byCohort = new Map();
+  for (const c of customers) {
+    const k = monthKey(c.signup);
+    if (!byCohort.has(k)) byCohort.set(k, []);
+    byCohort.get(k).push(c);
+  }
+  const cohortKeys = [...byCohort.keys()].sort();
+  const MAXM = 12;
+  const cohorts = cohortKeys.map(k => {
+    const members = byCohort.get(k);
+    const cIdx = monthIdx(members[0].signup);
+    const age = nowIdx - cIdx;
+    const cells = [], counts = [];
+    for (let m = 0; m <= MAXM; m++) {
+      if (m > age) { cells.push(null); counts.push(null); continue; }
+      const retained = members.filter(c => !c.churn || (monthIdx(c.churn) - cIdx) > m).length;
+      cells.push(retained / members.length); counts.push(retained);
+    }
+    return { key: k, n: members.length, cells, counts };
+  });
+
+  const allIdx = customers.map(c => monthIdx(c.signup));
+  const minIdx = Math.min(...allIdx);
+  const nrrMonths = [];
+  for (let mi = minIdx + 1; mi <= nowIdx; mi++) {
+    let startMrr = 0, churnedMrr = 0, newMrr = 0;
+    for (const c of customers) {
+      const s = monthIdx(c.signup), ch = c.churn ? monthIdx(c.churn) : Infinity;
+      if (s < mi && ch >= mi) { startMrr += c.mrr; if (ch === mi) churnedMrr += c.mrr; }
+      if (s === mi) newMrr += c.mrr;
+    }
+    if (startMrr > 0) nrrMonths.push({
+      idx: mi, label: Math.floor(mi/12) + "-" + String(mi%12+1).padStart(2,"0"),
+      startMrr, churnedMrr, newMrr, endMrr: startMrr - churnedMrr + newMrr,
+      nrr: (startMrr - churnedMrr) / startMrr * 100
+    });
+  }
+
+  const reasons = new Map();
+  for (const c of customers) if (c.churn) {
+    const r = c.reason || "unspecified";
+    const cur = reasons.get(r) || { count: 0, mrr: 0 };
+    cur.count++; cur.mrr += c.mrr;
+    reasons.set(r, cur);
+  }
+
+  const active = customers.filter(c => !c.churn).length;
+  return {
+    cohorts, nrrMonths, reasons,
+    stats: { total: customers.length, active, churned: customers.length - active,
+      activeMrr: customers.filter(c => !c.churn).reduce((s,c) => s + c.mrr, 0) }
+  };
+}
+
+/* ================= rendering ================= */
+
+let heatMode = "pct";
+
+function heatColor(p) {
+  const stops = [[248,113,113],[251,191,36],[52,211,153]];
+  const t = Math.max(0, Math.min(1, p));
+  const [a, b, f] = t < .5 ? [stops[0], stops[1], t*2] : [stops[1], stops[2], (t-.5)*2];
+  const c = a.map((v,i) => Math.round(v + (b[i]-v)*f));
+  return `rgba(${c[0]},${c[1]},${c[2]},0.85)`;
+}
+
+function renderHeatmap(cohorts) {
+  let h = "<table class='heat'><tr><th style='text-align:left'>Cohort</th><th>N</th>";
+  for (let m = 0; m <= 12; m++) h += `<th>M${m}</th>`;
+  h += "</tr>";
+  for (const c of cohorts) {
+    h += `<tr><td class='cohort'>${c.key}</td><td class='n'>${c.n}</td>`;
+    c.cells.forEach((v, m) => {
+      if (v == null) { h += "<td></td>"; return; }
+      const label = heatMode === "pct" ? Math.round(v*100) + "%" : c.counts[m];
+      h += `<td style="background:${heatColor(v)};color:#10131a;font-weight:600" title="${c.key} cohort, month ${m}: ${c.counts[m]} of ${c.n} active (${Math.round(v*100)}%)">${label}</td>`;
+    });
+    h += "</tr>";
+  }
+  document.getElementById("heatmap").innerHTML = h + "</table>";
+}
+
+let charts = [];
+function destroyCharts(){ charts.forEach(c => c.destroy()); charts = []; }
+const gridOpts = { grid: { color: "#2a2f3e" }, ticks: { color: "#8b91a3" } };
+
+function renderWaterfall(m) {
+  document.getElementById("wfMonth").textContent = m.label;
+  const steps = [
+    { l: "Starting MRR", range: [0, m.startMrr], col: "#6c7cff" },
+    { l: "Churned", range: [m.startMrr - m.churnedMrr, m.startMrr], col: "#f87171" },
+    { l: "New", range: [m.startMrr - m.churnedMrr, m.startMrr - m.churnedMrr + m.newMrr], col: "#34d399" },
+    { l: "Ending MRR", range: [0, m.endMrr], col: "#a78bfa" }
+  ];
+  charts.push(new Chart(waterfall, {
+    type: "bar",
+    data: { labels: steps.map(s => s.l),
+      datasets: [{ data: steps.map(s => s.range), backgroundColor: steps.map(s => s.col), borderRadius: 6 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: ctx => "$" + Math.abs(ctx.raw[1] - ctx.raw[0]).toLocaleString("en-US") } } },
+      scales: { x: gridOpts, y: gridOpts } }
+  }));
+}
+
+function renderNrrTrend(months) {
+  charts.push(new Chart(nrrTrend, {
+    type: "line",
+    data: { labels: months.map(m => m.label),
+      datasets: [{ label: "NRR %", data: months.map(m => m.nrr), borderColor: "#6c7cff",
+        backgroundColor: "rgba(108,124,255,.15)", fill: true, tension: .3, pointRadius: 2 }] },
+    options: { plugins: { legend: { display: false } },
+      scales: { x: gridOpts, y: { ...gridOpts, suggestedMin: 80, suggestedMax: 100 } } }
+  }));
+}
+
+function renderReasons(reasons) {
+  const entries = [...reasons.entries()].sort((a,b) => b[1].count - a[1].count).slice(0, 10);
+  const cols = ["#6c7cff","#f87171","#34d399","#fbbf24","#a78bfa","#22d3ee","#fb923c","#f472b6","#94a3b8","#86efac"];
+  charts.push(new Chart(reasonsChart, {
+    type: "doughnut",
+    data: { labels: entries.map(e => e[0]),
+      datasets: [{ data: entries.map(e => e[1].count), backgroundColor: cols, borderWidth: 0 }] },
+    options: { plugins: { legend: { position: "right", labels: { color: "#e6e8ee" } } } }
+  }));
+  charts.push(new Chart(reasonsMrr, {
+    type: "bar",
+    data: { labels: entries.map(e => e[0]),
+      datasets: [{ data: entries.map(e => e[1].mrr), backgroundColor: cols, borderRadius: 6 }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: ctx => "$" + Math.round(ctx.raw).toLocaleString("en-US") + "/mo lost" } } },
+      scales: { x: gridOpts, y: gridOpts } }
+  }));
+}
+
+function renderKpis(s, months) {
+  const avgNrr = months.slice(-3).reduce((a,m) => a + m.nrr, 0) / Math.min(3, months.length);
+  document.getElementById("kpis").innerHTML = [
+    [s.total.toLocaleString("en-US"), "Total customers"],
+    [s.active.toLocaleString("en-US"), "Active"],
+    ["$" + Math.round(s.activeMrr).toLocaleString("en-US"), "Active MRR"],
+    [avgNrr.toFixed(1) + "%", "NRR (3-mo avg)"],
+    [(s.churned / s.total * 100).toFixed(1) + "%", "Lifetime churn"]
+  ].map(([v,l]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+}
+
+function renderAll() {
+  destroyCharts();
+  const { cohorts, nrrMonths, reasons, stats } = DATA;
+  renderKpis(stats, nrrMonths);
+  renderHeatmap(cohorts);
+  renderWaterfall(nrrMonths[nrrMonths.length - 2] || nrrMonths[nrrMonths.length - 1]);
+  renderNrrTrend(nrrMonths);
+  renderReasons(reasons);
+  document.getElementById("results").style.display = "block";
+}
+
+document.getElementById("modePct").onclick = () => { heatMode = "pct"; toggleMode(); };
+document.getElementById("modeN").onclick = () => { heatMode = "n"; toggleMode(); };
+function toggleMode() {
+  document.getElementById("modePct").classList.toggle("on", heatMode === "pct");
+  document.getElementById("modeN").classList.toggle("on", heatMode === "n");
+  if (DATA) renderHeatmap(DATA.cohorts);
+}
+
+/* ================= upload + mapping flow ================= */
+
+const drop = document.getElementById("drop"), fileIn = document.getElementById("file"),
+      parseMsg = document.getElementById("parseMsg"), mapper = document.getElementById("mapper");
+drop.onclick = () => fileIn.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); handleFile(e.dataTransfer.files[0]); };
+fileIn.onchange = () => handleFile(fileIn.files[0]);
+
+function handleFile(file) {
+  if (!file) return;
+  parseMsg.innerHTML = "";
+  document.getElementById("results").style.display = "none";
+  mapper.style.display = "none";
+  Papa.parse(file, {
+    header: true, skipEmptyLines: true, delimitersToGuess: [",", "\t", ";", "|"],
+    complete: res => {
+      const headers = (res.meta.fields || []).filter(h => h && h.trim());
+      if (!headers.length || !res.data.length) {
+        parseMsg.innerHTML = `<div class="err">Could not read any rows. Is this a delimited text file with a header row?</div>`;
+        return;
+      }
+      RAW = { rows: res.data, headers };
+      const { map, conf } = detectColumns(headers, res.data);
+      buildMapper(map, conf);
+    },
+    error: err => parseMsg.innerHTML = `<div class="err">Parse error: ${err.message}</div>`
+  });
+}
+
+function sampleValues(header, k = 3) {
+  const out = [];
+  for (const r of RAW.rows) {
+    const v = r[header];
+    if (v != null && String(v).trim() !== "") out.push(String(v));
+    if (out.length >= k) break;
+  }
+  return out;
+}
+
+function buildMapper(map, conf) {
+  const tbody = document.getElementById("mapRows");
+  tbody.innerHTML = Object.entries(FIELDS).map(([field, def]) => {
+    const opts = ['<option value="">— not in this file —</option>']
+      .concat(RAW.headers.map(h => `<option value="${h.replace(/"/g,"&quot;")}" ${map[field] === h ? "selected" : ""}>${h}</option>`)).join("");
+    return `<tr>
+      <td class="fname">${field}${def.req ? ' <span class="req">*</span>' : ""}<div class="fdesc">${def.desc}</div></td>
+      <td><select data-field="${field}">${opts}</select></td>
+      <td class="samples" id="smp_${field}"></td>
+    </tr>`;
+  }).join("");
+  tbody.querySelectorAll("select").forEach(sel => {
+    sel.onchange = () => refreshMapper();
+  });
+  mapper.style.display = "block";
+  refreshMapper(conf);
+  mapper.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function currentMap() {
+  const m = {};
+  document.querySelectorAll("#mapRows select").forEach(sel => { if (sel.value) m[sel.dataset.field] = sel.value; });
+  return m;
+}
+
+function refreshMapper(conf) {
+  const m = currentMap();
+  for (const field of Object.keys(FIELDS)) {
+    const el = document.getElementById("smp_" + field);
+    el.textContent = m[field] ? sampleValues(m[field]).join("  ·  ") || "(all blank)" : "";
+    const sel = document.querySelector(`#mapRows select[data-field="${field}"]`);
+    sel.classList.toggle("missing", FIELDS[field].req && !m[field]);
+  }
+  const missing = Object.keys(FIELDS).filter(f => FIELDS[f].req && !m[f]);
+  const confEl = document.getElementById("mapConf");
+  if (missing.length) {
+    confEl.textContent = "needs attention"; confEl.className = "pill bad";
+    document.getElementById("mapHint").textContent = "Missing required: " + missing.join(", ");
+    document.getElementById("applyMap").disabled = true;
+  } else {
+    const lowConf = conf ? Object.entries(conf).filter(([,s]) => s < 80).map(([f]) => f) : [];
+    confEl.textContent = lowConf.length ? "check: " + lowConf.join(", ") : "auto-detected";
+    confEl.className = lowConf.length ? "pill" : "pill good";
+    document.getElementById("mapHint").textContent = !m.churn_date ? "No churn date mapped — every customer will be treated as active." : "";
+    document.getElementById("applyMap").disabled = false;
+  }
+}
+
+document.getElementById("applyMap").onclick = () => {
+  const colMap = currentMap();
+  const { customers, problems, noDate, badChurnOrder } = ingest(RAW.rows, colMap);
+  if (!customers.length) {
+    parseMsg.innerHTML = `<div class="err">No valid rows after parsing. Check that the mapped date and MRR columns contain real values.</div>`;
+    return;
+  }
+  let msg = `<div class="ok">Analyzed ${customers.length.toLocaleString("en-US")} customers (${RAW.rows.length.toLocaleString("en-US")} rows). Dates read as ${DATE_ORDER === "DMY" ? "day/month/year" : "month/day/year"} where ambiguous.</div>`;
+  if (problems.length) msg += `<div class="warn">Skipped ${problems.length} row(s) with missing/invalid id, date, or MRR (e.g. lines ${problems.slice(0,5).join(", ")}${problems.length > 5 ? "…" : ""}).</div>`;
+  if (badChurnOrder.length) msg += `<div class="warn">${badChurnOrder.length} row(s) had a churn date before signup — churn date ignored for those.</div>`;
+  if (noDate.length) {
+    const pct = (noDate.length / customers.length * 100).toFixed(0);
+    if (!colMap.churn_date) {
+      parseMsg.innerHTML = msg + `<div class="err">${noDate.length} row(s) (${pct}%) have a churned/canceled status but no churn date column is mapped — retention and NRR would be wrong. Map the churn date column above, or confirm your export really has no churn dates.</div>`;
+      return;
+    }
+    msg += `<div class="warn">${noDate.length} row(s) (${pct}%) are marked churned but have an empty churn date — treated as active, which inflates retention.</div>`;
+  }
+  parseMsg.innerHTML = msg;
+  DATA = analyze(customers);
+  renderAll();
+  document.getElementById("aiOut").style.display = "none";
+  document.getElementById("aiVerify").style.display = "none";
+  document.getElementById("copyBtn").style.display = "none";
+  document.getElementById("results").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+/* ================= AI summary: grounded two-stage pipeline =================
+   Stage 1 (deterministic): derive the claims in code — the model never decides
+   WHAT is true, only how to phrase it. Abstention thresholds below were set
+   empirically via eval/eval_harness.py (see eval/EVAL.md). */
+
+const THRESHOLDS = {
+  dropoffMinCohorts: 3,     // a drop-off month must be observed in >= 3 cohorts
+  dropoffMargin: 1.15,      // and beat the runner-up by >= 15% relative
+  reasonMargin: 1.10,       // top churn reason must lead #2 by >= 10%
+  nrrFlatBand: 3.0,         // |change| < 3.0 NRR pts over window => "flat" (noise <= 2.6 in eval)
+  nrrMinR: 0.6,             // trend must also be consistent (|pearson r| >= 0.6)
+  nrrWindow: 6              // trend window (complete months)
+};
+
+function deriveFindings(d) {
+  const f = {};
+  const drops = [];
+  for (let m = 1; m <= 12; m++) {
+    const vals = d.cohorts
+      .map(c => (c.cells[m] != null && c.cells[m-1]) ? (c.cells[m-1] - c.cells[m]) / c.cells[m-1] : null)
+      .filter(v => v != null);
+    if (vals.length >= THRESHOLDS.dropoffMinCohorts)
+      drops.push({ month: m, avgDrop: vals.reduce((a,b) => a+b, 0) / vals.length, nCohorts: vals.length });
+  }
+  drops.sort((a,b) => b.avgDrop - a.avgDrop);
+  if (drops.length >= 2 && drops[0].avgDrop >= drops[1].avgDrop * THRESHOLDS.dropoffMargin) {
+    f.biggest_dropoff = { month: "M" + drops[0].month, avg_drop_pct: +(drops[0].avgDrop*100).toFixed(1),
+      observed_in_cohorts: drops[0].nCohorts, runner_up: "M" + drops[1].month, runner_up_pct: +(drops[1].avgDrop*100).toFixed(1) };
+  } else {
+    f.biggest_dropoff = { verdict: "no_dominant_month",
+      note: drops.length >= 2 ? `M${drops[0].month} (${(drops[0].avgDrop*100).toFixed(1)}%) and M${drops[1].month} are too close to call` : "insufficient cohort depth" };
+  }
+
+  const entries = [...d.reasons.entries()].map(([r,v]) => ({ reason: r, customers: v.count, lost_mrr: Math.round(v.mrr) }));
+  const byCount = [...entries].sort((a,b) => b.customers - a.customers);
+  const byMrr   = [...entries].sort((a,b) => b.lost_mrr - a.lost_mrr);
+  if (byCount.length >= 2 && byCount[0].customers >= byCount[1].customers * THRESHOLDS.reasonMargin) {
+    f.top_churn_reason = { reason: byCount[0].reason, customers: byCount[0].customers,
+      share_pct: +(byCount[0].customers / entries.reduce((s,e) => s + e.customers, 0) * 100).toFixed(1),
+      also_top_by_mrr: byMrr[0].reason === byCount[0].reason,
+      top_by_mrr: byMrr[0].reason, top_by_mrr_lost: byMrr[0].lost_mrr };
+  } else if (byCount.length === 1) {
+    f.top_churn_reason = { reason: byCount[0].reason, customers: byCount[0].customers, share_pct: 100, also_top_by_mrr: true };
+  } else if (byCount.length === 0) {
+    f.top_churn_reason = { verdict: "no_churn_data" };
+  } else {
+    f.top_churn_reason = { verdict: "no_dominant_reason",
+      note: `"${byCount[0].reason}" (${byCount[0].customers}) and "${byCount[1].reason}" (${byCount[1].customers}) are statistically tied` };
+  }
+
+  const win = d.nrrMonths.slice(0, -1).slice(-THRESHOLDS.nrrWindow);
+  if (win.length >= 3) {
+    const n = win.length, xs = win.map((_,i) => i), ys = win.map(m => m.nrr);
+    const xm = (n-1)/2, ym = ys.reduce((a,b) => a+b,0)/n;
+    const sxx = xs.reduce((s,x) => s + (x-xm)**2, 0);
+    const sxy = xs.reduce((s,x,i) => s + (x-xm)*(ys[i]-ym), 0);
+    const syy = ys.reduce((s,y) => s + (y-ym)**2, 0);
+    const slope = sxy / sxx, totalChange = slope * (n-1);
+    const r = syy > 0 ? sxy / Math.sqrt(sxx * syy) : 0;
+    const isTrend = Math.abs(totalChange) >= THRESHOLDS.nrrFlatBand && Math.abs(r) >= THRESHOLDS.nrrMinR;
+    f.nrr_trend = {
+      direction: isTrend ? (totalChange > 0 ? "improving" : "declining") : "flat",
+      change_points: +totalChange.toFixed(1), window_months: n,
+      first: { month: win[0].label, nrr_pct: +win[0].nrr.toFixed(1) },
+      last:  { month: win[n-1].label, nrr_pct: +win[n-1].nrr.toFixed(1) }
+    };
+  } else {
+    f.nrr_trend = { verdict: "insufficient_history", months_available: win.length };
+  }
+
+  f.kpis = { total_customers: d.stats.total, active: d.stats.active, active_mrr: Math.round(d.stats.activeMrr) };
+  return f;
+}
+
+function verifySummary(text, facts) {
+  const factNums = new Set();
+  (JSON.stringify(facts).match(/-?\d+\.?\d*/g) || []).forEach(n => {
+    const v = parseFloat(n);
+    factNums.add(v); factNums.add(Math.round(v)); factNums.add(Math.abs(v)); factNums.add(Math.abs(Math.round(v)));
+  });
+  const issues = [];
+  const outNums = (text.replace(/,/g, "").match(/-?\d+\.?\d*/g) || []).map(parseFloat);
+  for (const n of outNums) {
+    const ok = [...factNums].some(fv => Math.abs(fv - Math.abs(n)) <= 0.05 || Math.abs(fv - Math.abs(n)) <= Math.abs(fv) * 0.005);
+    if (!ok) issues.push(`number ${n} not found in facts`);
+  }
+  const dir = facts.nrr_trend?.direction;
+  if (dir) {
+    const saysImproving = /improv|rising|upward|recover|gaining|trending up/i.test(text);
+    const saysDeclining = /declin|falling|downward|deteriorat|worsen|trending down|dropp?ing/i.test(text);
+    if (dir === "improving" && saysDeclining) issues.push("says declining but computed trend is improving");
+    if (dir === "declining" && saysImproving) issues.push("says improving but computed trend is declining");
+    if (dir === "flat" && (saysImproving || saysDeclining)) issues.push("claims a trend but computed trend is flat");
+  }
+  return issues;
+}
+
+document.getElementById("copyBtn").onclick = async function() {
+  await navigator.clipboard.writeText(document.getElementById("aiOut").textContent);
+  this.textContent = "Copied!"; setTimeout(() => this.textContent = "Copy", 1500);
+};
+
+document.getElementById("aiBtn").onclick = async () => {
+  const key = document.getElementById("apiKey").value.trim();
+  const out = document.getElementById("aiOut"), badge = document.getElementById("aiVerify");
+  out.style.display = "block"; badge.style.display = "none";
+  if (!DATA) { out.textContent = "Upload a CSV first."; return; }
+
+  const facts = deriveFindings(DATA);
+  document.getElementById("aiFacts").textContent = JSON.stringify(facts, null, 2);
+
+  if (!key) { out.textContent = "Enter your Anthropic API key (it is only used in this browser, never stored). The derived facts are viewable below either way."; return; }
+  out.innerHTML = '<span class="spin"></span> Analyzing…';
+
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 300,
+        system: "You convert pre-computed SaaS retention findings into plain English for a PM. Rules: use ONLY the numbers and verdicts in the JSON — never compute, extrapolate, or infer anything beyond it. If a finding's verdict is no_dominant_month / no_dominant_reason / insufficient_history / flat, say so plainly rather than naming a winner or trend. Exactly 3 sentences, one per finding, no preamble.",
+        messages: [{ role: "user", content: JSON.stringify(facts) }]
+      })
+    });
+    const j = await resp.json();
+    if (j.error) throw new Error(j.error.message);
+    const text = j.content[0].text;
+    out.textContent = text;
+    document.getElementById("copyBtn").style.display = "inline-block";
+    const issues = verifySummary(text, facts);
+    badge.style.display = "block";
+    badge.innerHTML = issues.length
+      ? `<div class="warn">&#9888; Grounding check failed: ${issues.join("; ")}. Treat this summary with caution.</div>`
+      : `<div class="ok">&#10003; Grounding check passed — every number and trend claim traces back to computed facts.</div>`;
+  } catch (e) {
+    out.innerHTML = `<span style="color:var(--red)">API error: ${e.message}</span>`;
+  }
+};
+</script>
+</body>
+</html>
