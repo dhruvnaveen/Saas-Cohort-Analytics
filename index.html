@@ -128,10 +128,11 @@
   <div class="card">
     <h2>AI insight summary</h2>
     <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
-      <input type="password" id="apiKey" placeholder="Anthropic API key (sk-ant-...) — stays in your browser">
-      <button id="aiBtn">Generate summary</button>
+      <button id="localBtn">Instant summary — free, no key</button>
+      <input type="password" id="apiKey" placeholder="Optional: Anthropic API key for AI phrasing">
+      <button class="ghost" id="aiBtn" style="padding:10px 18px; font-size:14px">AI summary</button>
       <button class="ghost" id="copyBtn" style="display:none">Copy</button>
-      <span class="pill">Claude API</span><span class="pill">Grounded in your data</span>
+      <span class="pill">Grounded in your data</span>
     </div>
     <div id="aiOut"></div>
     <div id="aiVerify" style="display:none; margin-top:10px"></div>
@@ -729,6 +730,47 @@ function verifySummary(text, facts) {
   }
   return issues;
 }
+
+/* Rule-based summary: same derived facts, template phrasing. No API, no
+   hallucination risk by construction. */
+function localSummary(f) {
+  const s = [];
+  const bd = f.biggest_dropoff;
+  if (bd.month) {
+    s.push(`Your biggest retention drop-off is at ${bd.month}, where cohorts lose ${bd.avg_drop_pct}% of remaining customers on average (seen across ${bd.observed_in_cohorts} cohorts, ahead of ${bd.runner_up} at ${bd.runner_up_pct}%).`);
+  } else {
+    s.push(`No single month stands out as the biggest retention drop-off — ${bd.note}.`);
+  }
+  const tr = f.top_churn_reason;
+  if (tr.reason) {
+    s.push(`"${tr.reason}" is the #1 churn reason at ${tr.share_pct}% of churned customers${tr.also_top_by_mrr ? ", and it also accounts for the most lost MRR" : ` (though "${tr.top_by_mrr}" costs more in lost MRR at $${tr.top_by_mrr_lost.toLocaleString("en-US")}/mo)`}.`);
+  } else if (tr.verdict === "no_dominant_reason") {
+    s.push(`No single churn reason dominates — ${tr.note}.`);
+  } else {
+    s.push(`There is no churn reason data in this file.`);
+  }
+  const nt = f.nrr_trend;
+  if (nt.direction === "improving" || nt.direction === "declining") {
+    s.push(`NRR is ${nt.direction}: ${nt.change_points > 0 ? "+" : ""}${nt.change_points} points over the last ${nt.window_months} months (${nt.first.nrr_pct}% in ${nt.first.month} → ${nt.last.nrr_pct}% in ${nt.last.month}).`);
+  } else if (nt.direction === "flat") {
+    s.push(`NRR is roughly flat over the last ${nt.window_months} months (${nt.first.nrr_pct}% → ${nt.last.nrr_pct}%; the ${nt.change_points >= 0 ? "+" : ""}${nt.change_points}-point movement is within noise).`);
+  } else {
+    s.push(`Not enough monthly history yet to call an NRR trend.`);
+  }
+  return s.join(" ");
+}
+
+document.getElementById("localBtn").onclick = () => {
+  const out = document.getElementById("aiOut"), badge = document.getElementById("aiVerify");
+  out.style.display = "block";
+  if (!DATA) { out.textContent = "Upload a CSV first."; return; }
+  const facts = deriveFindings(DATA);
+  document.getElementById("aiFacts").textContent = JSON.stringify(facts, null, 2);
+  out.textContent = localSummary(facts);
+  document.getElementById("copyBtn").style.display = "inline-block";
+  badge.style.display = "block";
+  badge.innerHTML = `<div class="ok">&#10003; Deterministic summary — generated directly from the computed facts, no AI involved.</div>`;
+};
 
 document.getElementById("copyBtn").onclick = async function() {
   await navigator.clipboard.writeText(document.getElementById("aiOut").textContent);
